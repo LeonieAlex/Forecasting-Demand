@@ -1,0 +1,11 @@
+output/
+forecasting/results/
+__pycache__/
+*.pyc
+*.pyo
+.DS_Store
+.claude/
+*.egg-info/
+dist/
+build/
+.env
