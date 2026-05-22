@@ -20,7 +20,6 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from simulator.engine import SimulationEngine, SimConfig
 from simulator.demand import DemandParams
-from simulator.fuel import FuelConsumptionParams
 from simulator.booking_curves import BookingCurveParams
 
 
@@ -50,12 +49,6 @@ def run_simulation(args) -> pd.DataFrame:
             base_yield_economy_usd=750,
             direct_yield_premium=0.22,
             connecting_share_base=0.28,
-        ),
-
-        fuel=FuelConsumptionParams(
-            cruise_step_min=30,
-            taxi_time_min=18,
-            apply_wind_correction=True,
         ),
 
         booking=BookingCurveParams(
@@ -93,21 +86,6 @@ def print_summary(df: pd.DataFrame):
 
     print("\n── Passenger payload ────────────────────────────────────")
     print(f"Avg pax payload:  {df['pax_payload_kg'].mean():,.0f} kg/flight  (seats × 100 kg, source: Lufthansa)")
-
-    print("\n── Fuel consumption (ICAO Annex 6) ─────────────────────")
-    print(f"  m_trip:       {df['trip_fuel_kg'].mean():,.0f} kg  (climb + cruise + descent)")
-    print(f"    climb:      {df['climb_fuel_kg'].mean():,.0f} kg")
-    print(f"    cruise:     {df['cruise_fuel_kg'].mean():,.0f} kg")
-    print(f"    descent:    {df['descent_fuel_kg'].mean():,.0f} kg")
-    print(f"  m_cont:       {df['contingency_fuel_kg'].mean():,.0f} kg  (5% of trip)")
-    print(f"  m_altn:       {df['alternate_fuel_kg'].mean():,.0f} kg  (200nm diversion)")
-    print(f"  m_final_res:  {df['final_reserve_kg'].mean():,.0f} kg  (30 min holding)")
-    print(f"  m_taxi:       {df['taxi_fuel_kg'].mean():,.0f} kg  (ICAO EDB idle flow)")
-    print(f"  m_total:      {df['total_fuel_uplifted_kg'].mean():,.0f} kg uplifted")
-    print(f"  fuel (tonnes):{df['fuel_tonnes'].mean():.1f} t/flight")
-    print(f"  fuel/seat:    {df['fuel_per_seat_kg'].mean():.1f} kg/seat sold")
-    print(f"  fuel/ASK:     {df['fuel_per_ask_kg'].mean():.5f} kg/ASK")
-    print(f"  fuel/RPK:     {df['fuel_per_rpk_kg'].mean():.5f} kg/RPK")
 
     print("\n── Revenue ──────────────────────────────────────────────")
     print(f"Total revenue:    ${df['revenue_usd'].sum()/1e9:.2f}B (10yr simulated)")
@@ -155,25 +133,38 @@ def save_outputs(df: pd.DataFrame, out_path: str):
 
     # Also save a slim version with just the key forecasting columns
     slim_cols = [
-        "date", "year", "month", "day", "dow", "flight_od", "market_country", "is_connecting",
-        "aircraft_type", "openap_aircraft_code", "engine_name", "distance_km",
-        "load_factor", "seats_sold", "seats_capacity",
+        "date", "year", "month", "day", "dow", "od_pair", "dest_country",
+        "flight_od", "market_country", "is_connecting",
+        "aircraft_type", "distance_km",
+        "load_factor", "lf_raw", "is_censored",
+        "seats_sold", "seats_capacity", "latent_seats_sold",
         "seats_direct", "seats_connecting",
         "yield_overall_blended", "revenue_usd",
         "pax_payload_kg",
-        # ICAO Annex 6 fuel components (Eq. 3.7)
-        "trip_fuel_kg", "climb_fuel_kg", "cruise_fuel_kg", "descent_fuel_kg",
-        "contingency_fuel_kg", "alternate_fuel_kg", "final_reserve_kg",
-        "taxi_fuel_kg", "total_fuel_uplifted_kg",
-        # Units and efficiency KPIs
-        "fuel_tonnes", "fuel_litres",
-        "fuel_per_seat_kg", "fuel_per_ask_kg", "fuel_per_rpk_kg",
-        "wind_correction",
         "seasonal_index", "dow_factor", "shock_factor", "rask_usd",
     ]
     slim_path = out_path.replace(".csv", "_slim.csv")
     df[slim_cols].to_csv(slim_path, index=False)
     print(f"Saved slim version → {slim_path}")
+
+    # Aggregated O-D demand — true market demand regardless of routing
+    od_df = (
+        df.groupby(["date", "year", "month", "day", "od_pair", "market_country", "dest_country"])
+        .agg(
+            constrained_seats = ("seats_sold",        "sum"),   # actually boarded
+            latent_seats      = ("latent_seats_sold",  "sum"),   # true demand (pre-capacity)
+            total_capacity    = ("seats_capacity",     "sum"),   # total seats available
+            total_revenue_usd = ("revenue_usd",        "sum"),
+            avg_load_factor   = ("load_factor",        "mean"),
+            censored_flights  = ("is_censored",        "sum"),   # flights that hit capacity
+            n_routes          = ("flight_od",          "count"),
+        )
+        .reset_index()
+    )
+    od_df["spilled_seats"] = (od_df["latent_seats"] - od_df["constrained_seats"]).clip(lower=0)
+    od_path = out_path.replace(".csv", "_od_demand.csv")
+    od_df.to_csv(od_path, index=False)
+    print(f"Saved O-D demand → {od_path}  ({len(od_df):,} rows)")
 
 
 if __name__ == "__main__":

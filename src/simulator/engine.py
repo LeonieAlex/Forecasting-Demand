@@ -29,13 +29,10 @@ from datetime import date, timedelta
 from typing import Optional
 
 from simulator.config import (
-    COUNTRIES, ROUTES, AIRCRAFT,
+    COUNTRIES, ROUTES, AIRCRAFT, AIRPORT_COUNTRY,
     Country, Route, Aircraft,
 )
 from simulator.shocks import ShockEngine
-from simulator.fuel import (
-    FuelConsumptionParams, compute_fuel_consumption, fuel_efficiency_metrics,
-)
 from simulator.demand import DemandParams, simulate_route_day
 from simulator.booking_curves import (
     BookingCurveParams, generate_booking_curves,
@@ -55,7 +52,6 @@ class SimConfig:
 
     # Sub-module params
     demand: DemandParams = field(default_factory=DemandParams)
-    fuel: FuelConsumptionParams = field(default_factory=FuelConsumptionParams)
     booking: BookingCurveParams = field(default_factory=BookingCurveParams)
 
     # Reading dates: DTP snapshots to include in output (None = skip)
@@ -146,26 +142,8 @@ class SimulationEngine:
                 )
 
                 # ── Passenger payload (pax body + baggage, 100 kg/seat) ──────
-                # Source: Lufthansa operational data
+                # Source: Lufthansa operational data; no cargo modelled.
                 pax_payload_kg = rec["seats_sold"] * 100
-
-                # ── Fuel consumption (OpenAP + ICAO Annex 6) ─────────────────
-                fuel_data = compute_fuel_consumption(
-                    aircraft_type=route.aircraft_type,
-                    distance_km=route.distance_km,
-                    pax_payload_kg=pax_payload_kg,
-                    params=self.config.fuel,
-                    market_country=route.market_country,
-                    dest_region="us",
-                )
-
-                # ── Fuel efficiency KPIs ──────────────────────────────────────
-                fuel_eff = fuel_efficiency_metrics(
-                    fuel_data=fuel_data,
-                    seats_sold=rec["seats_sold"],
-                    seats_capacity=aircraft.total_seats,
-                    distance_km=route.distance_km,
-                )
 
                 # ── Booking curve reading date snapshots ──────────────────────
                 booking_snap = {}
@@ -188,21 +166,25 @@ class SimulationEngine:
                             booking_snap[f"{col_prefix}_booked"] = data["booked_seats"]
                             booking_snap[f"{col_prefix}_pct"]    = data["pct_booked"]
 
+                # ── O-D market pair (true demand, routing-independent) ────────
+                dest_country = AIRPORT_COUNTRY.get(route.dest_airport, "??")
+                od_pair      = f"{route.market_country}→{dest_country}"
+
+                # Censored = latent demand exceeded physical seat capacity
+                is_censored = int(rec["latent_seats_sold"] > aircraft.total_seats)
+
                 # ── Assemble full record ──────────────────────────────────────
                 records.append({
-                    "year":  year,
-                    "month": month,
-                    "day":   day,
-                    "dow":   dow,
-                    "date":  current_date.isoformat(),
+                    "year":         year,
+                    "month":        month,
+                    "day":          day,
+                    "dow":          dow,
+                    "date":         current_date.isoformat(),
+                    "dest_country": dest_country,
+                    "od_pair":      od_pair,
+                    "is_censored":  is_censored,
                     **rec,
-                    # Passenger payload
                     "pax_payload_kg": pax_payload_kg,
-                    # Fuel consumption (physical quantities only)
-                    **fuel_data,
-                    # Fuel efficiency KPIs
-                    **fuel_eff,
-                    # Booking snapshots
                     **booking_snap,
                 })
 
@@ -228,6 +210,10 @@ class SimulationEngine:
 
     def _add_derived_columns(self, df: pd.DataFrame) -> pd.DataFrame:
         """Add derived KPI columns after the main loop."""
+
+        # Available seat-km and revenue seat-km
+        df["ask_km"] = df["seats_capacity"] * df["distance_km"]
+        df["rpk_km"] = df["seats_sold"]     * df["distance_km"]
 
         # RASK (revenue per available seat-km) — passenger revenue only
         df["rask_usd"] = (

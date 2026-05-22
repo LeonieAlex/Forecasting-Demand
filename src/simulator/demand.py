@@ -30,6 +30,8 @@ from simulator.shocks import ShockEngine
 class DemandParams:
     base_load_factor: float = 0.72       # global baseline LF
     noise_sigma: float = 0.08            # Gaussian noise σ (fraction)
+    seasonal_noise_sigma: float = 0.06   # stochastic variation around monthly seasonal index
+    dow_noise_sigma: float = 0.05        # stochastic variation around DOW multiplier
     price_elasticity: float = 0.80       # how much yield rises with LF
     base_yield_economy_usd: float = 750  # base economy yield (USD, one-way)
     direct_yield_premium: float = 0.22   # direct pax pay this much more than connecting
@@ -81,13 +83,19 @@ def simulate_route_day(
 
     route_base = route.base_load_factor           # route-specific baseline
     seasonal   = get_seasonal_index(country.season_profile, calendar_month)
+    seasonal   = seasonal * (1.0 + params.seasonal_noise_sigma * rng.standard_normal())
     dow_factor = get_dow_index(dow)
-    trend      = 1.0 + country.demand_trend * (month_idx / 12)
+    dow_factor = dow_factor * (1.0 + params.dow_noise_sigma * rng.standard_normal())
+    # Front-loaded growth: high acceleration in early years, tapering to base rate.
+    # accel decays from 1.5x to 1.0x over the first ~3 years.
+    years_elapsed = month_idx / 12
+    accel  = 1.0 + 0.5 * np.exp(-years_elapsed / 3.0)
+    trend  = 1.0 + country.demand_trend * accel * years_elapsed
     shock      = shock_engine.get_multiplier(month_idx, country.id)
     noise      = 1.0 + params.noise_sigma * rng.standard_normal()
 
-    lf = route_base * seasonal * dow_factor * trend * shock * noise
-    lf = float(np.clip(lf, 0.15, 0.99))
+    lf_raw = route_base * seasonal * dow_factor * trend * shock * noise
+    lf = float(np.clip(lf_raw, 0.15, 0.99))
 
     # ── 2. Seats by cabin ─────────────────────────────────────────────────────
 
@@ -103,6 +111,7 @@ def simulate_route_day(
 
     total_seats_sold = sum(cabin_seats.values())
     total_capacity   = aircraft.total_seats
+    latent_seats_sold = round(float(lf_raw) * total_capacity)
 
     # ── 3. Connecting vs direct split ─────────────────────────────────────────
 
@@ -121,7 +130,6 @@ def simulate_route_day(
     economy_yield = params.base_yield_economy_usd * (
         1.0 + params.price_elasticity * lf_deviation
     )
-    # Apply fuel surcharge (caller can pass pre-computed value; default 0)
     economy_yield = max(150.0, economy_yield)
 
     cabin_yield = {
@@ -160,10 +168,12 @@ def simulate_route_day(
         "aircraft_type":     aircraft.type,
         "distance_km":       route.distance_km,
 
-        # Demand
+        # Demand — constrained (clipped to capacity) and latent (true desire)
         "load_factor":       round(lf, 4),
+        "lf_raw":            round(float(lf_raw), 4),
         "seats_sold":        total_seats_sold,
         "seats_capacity":    total_capacity,
+        "latent_seats_sold": latent_seats_sold,
         "seats_direct":      direct_seats,
         "seats_connecting":  conn_seats,
 

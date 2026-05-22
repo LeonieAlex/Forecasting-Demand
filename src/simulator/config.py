@@ -55,7 +55,6 @@ class Aircraft:
     business_seats: int
     premium_eco_seats: int
     economy_seats: int
-    fuel_burn_kg_per_km: float
     max_payload_kg: int
 
 
@@ -339,7 +338,7 @@ ROUTES: list[Route] = [
 # AIRCRAFT
 # ==============================================================================
 # Seat configs based on dominant operator layouts on transpacific as of 2025/26.
-# fuel_burn_kg_per_km at ~80% load factor, cruise conditions.
+# max_payload_kg = structural payload limit (passengers + baggage, no cargo modelled).
 
 AIRCRAFT: dict[str, Aircraft] = {
 
@@ -351,7 +350,6 @@ AIRCRAFT: dict[str, Aircraft] = {
         business_seats=52,
         premium_eco_seats=24,
         economy_seats=312,
-        fuel_burn_kg_per_km=8.50,
         max_payload_kg=100_000,
     ),
 
@@ -363,7 +361,6 @@ AIRCRAFT: dict[str, Aircraft] = {
         business_seats=28,
         premium_eco_seats=21,
         economy_seats=197,
-        fuel_burn_kg_per_km=5.60,
         max_payload_kg=52_000,
     ),
 
@@ -376,7 +373,6 @@ AIRCRAFT: dict[str, Aircraft] = {
         business_seats=48,
         premium_eco_seats=21,
         economy_seats=189,
-        fuel_burn_kg_per_km=5.80,
         max_payload_kg=56_000,
     ),
 
@@ -389,21 +385,18 @@ AIRCRAFT: dict[str, Aircraft] = {
         business_seats=32,
         premium_eco_seats=48,
         economy_seats=226,
-        fuel_burn_kg_per_km=6.00,
         max_payload_kg=65_000,
     ),
 
     "A350ULR": Aircraft(
         # Airbus A350-900ULR -- Singapore Airlines SIN-JFK / SIN-EWR
         # Premium-only; no economy cabin. 161 seats total.
-        # Extra fuel tanks, reduced payload for 19h+ flights
         type="A350ULR",
         total_seats=161,
         first_seats=0,
         business_seats=67,
         premium_eco_seats=94,
         economy_seats=0,
-        fuel_burn_kg_per_km=5.40,
         max_payload_kg=32_000,
     ),
 
@@ -416,7 +409,22 @@ AIRCRAFT: dict[str, Aircraft] = {
         business_seats=76,
         premium_eco_seats=60,
         economy_seats=341,
-        fuel_burn_kg_per_km=10.50,
         max_payload_kg=150_000,
     ),
+}
+
+
+# ==============================================================================
+# AIRPORT → COUNTRY MAPPING
+# ==============================================================================
+# Maps destination airport IATA codes to ISO-2 country codes.
+# Used to derive true O-D country pairs independent of routing.
+
+AIRPORT_COUNTRY: dict[str, str] = {
+    # United States
+    "LAX": "US", "SFO": "US", "JFK": "US", "EWR": "US",
+    "ORD": "US", "SEA": "US", "IAH": "US", "DFW": "US",
+    "ATL": "US", "PHX": "US",
+    # Canada
+    "YVR": "CA", "YYZ": "CA", "YUL": "CA",
 }
