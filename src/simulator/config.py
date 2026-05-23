@@ -22,6 +22,76 @@ SeasonProfile = Literal[
 ]
 
 
+# ==============================================================================
+# OD MARKET SIZE  (Layer 1 — true latent demand, supply-independent)
+# ==============================================================================
+# μ_OD: fixed daily passenger demand for each OD corridor at the simulation's
+# base year, before any seasonal / trend / shock multipliers are applied.
+#
+# These are CALIBRATED CONSTANTS — they must not be derived from seat counts.
+# Adding or removing a flight changes capacity (Layer 2) but never this number.
+#
+# Calibration method: targeted at ~87 % average load factor across the network,
+# informed by OAG/IATA corridor volumes for 2015 (simulation base year).
+# To recalibrate: replace with values from historical booking data or a gravity
+# model trained on actual O&D traffic — the interface stays the same.
+
+OD_MARKET_SIZE: dict[str, float] = {
+    #  OD pair          μ_OD    notes
+    "AU→US":           2_300,  # 10 routes; strong and growing AU outbound
+    "JP→US":           1_900,  # 9 routes;  mature, seasonally peaky
+    "CN→US":           1_900,  # 8 routes;  recovering, geopolitical sensitive
+    "KR→US":           1_100,  # 5 routes;  hub-driven, KE/OZ JV
+    "TW→US":             880,  # 4 routes;  CI/EVA duopoly
+    "AE→US":             690,  # 2 routes;  EK/EY A380 premium mix
+    "SG→US":             660,  # 4 routes;  A350ULR premium-heavy
+    "HK→CA":             540,  # 2 routes;  CX/HK Express dominance
+    "HK→US":             500,  # 2 routes;  declining since 2019
+    "GB→US":             480,  # 2 routes;  6th-freedom via Asia hubs
+    "JP→CA":             360,  # 2 routes;  YVR gateway
+    "CN→CA":             350,  # 2 routes;  Vancouver diaspora flow
+    "KR→CA":             350,  # 2 routes;  growing KE/AC partnership
+    "DE→US":             270,  # 1 route;   6th-freedom via Asian hubs
+    "NL→US":             175,  # 1 route;   KL/SIA codeshare flow
+}
+
+
+# Maps IATA airport code → ISO-2 country code.
+# Used to derive dest_country from a route's dest_airport.
+AIRPORT_COUNTRY: dict[str, str] = {
+    # United States
+    "LAX": "US", "SFO": "US", "JFK": "US", "ORD": "US",
+    "SEA": "US", "IAH": "US", "DFW": "US", "ATL": "US",
+    "EWR": "US", "PHX": "US", "BOS": "US", "MIA": "US",
+    # Canada
+    "YVR": "CA", "YYZ": "CA", "YUL": "CA",
+    # Japan
+    "HND": "JP", "NRT": "JP", "KIX": "JP", "NGO": "JP", "FUK": "JP",
+    # South Korea
+    "ICN": "KR", "GMP": "KR",
+    # China
+    "PEK": "CN", "PKX": "CN", "PVG": "CN", "CAN": "CN",
+    "CTU": "CN", "SZX": "CN", "HGH": "CN", "CGO": "CN",
+    # Hong Kong
+    "HKG": "HK",
+    # Taiwan
+    "TPE": "TW", "KHH": "TW",
+    # Singapore
+    "SIN": "SG",
+    # Australia
+    "SYD": "AU", "MEL": "AU", "BNE": "AU", "ADL": "AU",
+    "PER": "AU", "CBR": "AU",
+    # UAE
+    "DXB": "AE", "AUH": "AE",
+    # United Kingdom
+    "LHR": "GB", "LGW": "GB", "MAN": "GB",
+    # Germany
+    "FRA": "DE", "MUC": "DE",
+    # Netherlands
+    "AMS": "NL",
+}
+
+
 @dataclass
 class Country:
     id: str                       # ISO-2 code
@@ -71,7 +141,7 @@ COUNTRIES: dict[str, Country] = {
         id="JP", name="Japan",
         season_profile="japan",           # quad-modal: GW/Obon/cherry blossom/NYE
         macro_vol=0.08,
-        demand_trend=0.012,               # 24% YoY surge summer 2025 (IATA Q1 2025)
+        demand_trend=0.012,               # differential vs global trend; strong inbound tourism recovery
         currency_sensitivity=0.65,        # JPY weakness strongly suppresses outbound
         hubs=["HND", "NRT", "KIX", "NGO", "FUK"],
     ),
@@ -80,7 +150,7 @@ COUNTRIES: dict[str, Country] = {
         id="CN", name="China",
         season_profile="china",           # tri-modal: CNY/May Golden Week/Oct National Day
         macro_vol=0.16,                   # elevated: geopolitical + capacity restrictions
-        demand_trend=0.022,               # recovering but below pre-COVID trajectory
+        demand_trend=0.022,               # differential vs global trend; recovering but below pre-COVID trajectory
         currency_sensitivity=0.40,        # capital controls dampen FX pass-through
         hubs=["PEK", "PKX", "PVG", "CAN", "CTU", "SZX", "HGH"],
     ),
@@ -89,7 +159,7 @@ COUNTRIES: dict[str, Country] = {
         id="KR", name="South Korea",
         season_profile="korea",           # quad-modal: Seollal/summer/Chuseok/spring
         macro_vol=0.09,
-        demand_trend=0.018,               # strong; ICN growing as Asia hub (KE-DL JV)
+        demand_trend=0.018,               # differential vs global trend; ICN growing as Asia hub
         currency_sensitivity=0.52,
         hubs=["ICN", "GMP"],
     ),
@@ -107,7 +177,7 @@ COUNTRIES: dict[str, Country] = {
         id="SG", name="Singapore",
         season_profile="singapore",       # flat with Jun/Dec school holiday peaks
         macro_vol=0.07,
-        demand_trend=0.020,               # SIA capacity +44% to KR vs 2019; SIN-SFO 14/wk
+        demand_trend=0.020,               # differential vs global trend; SIA capacity expansion
         currency_sensitivity=0.33,
         hubs=["SIN"],
     ),
@@ -125,7 +195,7 @@ COUNTRIES: dict[str, Country] = {
         id="AU", name="Australia",
         season_profile="australia",       # SOUTHERN HEMISPHERE INVERTED: Dec/Jan peak
         macro_vol=0.08,
-        demand_trend=0.016,               # US-AU up 8% YoY; US now 3rd largest AU market
+        demand_trend=0.016,               # differential vs global trend; US-AU up 8% YoY
         currency_sensitivity=0.55,        # AUD highly volatile vs USD
         hubs=["SYD", "MEL", "BNE", "PER", "ADL"],
     ),
@@ -185,7 +255,7 @@ COUNTRIES: dict[str, Country] = {
         id="AE", name="UAE",
         season_profile="middle_east",     # heat-escape summer dominant + Eid spikes
         macro_vol=0.11,                   # geopolitical shock exposure
-        demand_trend=0.025,               # Vision 2030 effect; EK/EY massive expansion
+        demand_trend=0.025,               # differential vs global trend; Vision 2030 + EK/EY expansion
         currency_sensitivity=0.20,        # AED pegged to USD
         hubs=["DXB", "AUH"],
     ),
