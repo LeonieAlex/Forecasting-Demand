@@ -59,17 +59,16 @@ TRAIN_END   = "2022-12-31"
 TEST_START  = "2023-01-01"
 
 # Demand signals to compare (column name → display label)
+# Naive is omitted — identical to Constrained, adds no information.
 SIGNALS = {
     "constrained_seats": "Constrained",
-    "naive_seats":       "Naive",
     "em_seats":          "EM",
     "pd_seats":          "PD",
     "latent_seats":      "Oracle",
 }
 
 COLORS = {
-    "Constrained": "#555555",
-    "Naive":       "#AAAAAA",
+    "Constrained": "#777777",
     "EM":          "#3B6FA0",
     "PD":          "#2E8B57",
     "Oracle":      "#C05050",
@@ -129,33 +128,41 @@ def forecast_od(df_od: pd.DataFrame, od: str) -> tuple[list[dict], pd.DataFrame]
 # ── Plotting ──────────────────────────────────────────────────────────────────
 
 def plot_od(pred_df: pd.DataFrame, od: str, metrics: pd.DataFrame, out_dir: str):
-    """Time-series plot for one O-D pair showing all forecasts vs oracle."""
+    """Time-series plot for one O-D pair: SARIMA forecasts vs true latent demand."""
     fig, ax = plt.subplots(figsize=(14, 5))
 
     dates = pred_df["date"]
-    ax.plot(dates, pred_df["oracle"], color="black", lw=1.5, alpha=0.5,
-            label="Oracle (true demand)", zorder=5)
 
+    # True latent demand (ground truth) — prominent filled band
+    ax.fill_between(dates, 0, pred_df["oracle"], alpha=0.12, color="black")
+    ax.plot(dates, pred_df["oracle"], color="black", lw=2.0, alpha=0.7,
+            label="Latent demand (oracle)", zorder=6)
+
+    # Forecast lines for each demand signal
     for label, color in COLORS.items():
         if label not in pred_df.columns or label == "Oracle":
             continue
-        m = metrics[metrics["model"] == label].iloc[0] if label in metrics["model"].values else None
-        lbl = f"{label}  (WAPE={m['WAPE']:.2f}%)" if m is not None else label
-        ax.plot(dates, pred_df[label], color=color, lw=1.0, alpha=0.8, label=lbl)
+        m   = metrics[metrics["model"] == label].iloc[0] if label in metrics["model"].values else None
+        lbl = f"{label}  (WAPE={m['WAPE']:.1f}%)" if m is not None else label
+        lw  = 1.6 if label in ("EM", "PD") else 1.0
+        ax.plot(dates, pred_df[label], color=color, lw=lw, alpha=0.85, label=lbl)
 
     ax.xaxis.set_major_locator(plt.matplotlib.dates.MonthLocator(interval=2))
     ax.xaxis.set_major_formatter(plt.matplotlib.dates.DateFormatter("%b %Y"))
     plt.xticks(rotation=20, ha="right", fontsize=8)
-    ax.set_title(f"{od} — Forecast Comparison (Test: 2023–2024)", fontsize=11)
-    ax.set_ylabel("Passengers")
+    ax.set_title(
+        f"{od}  —  Passenger Demand Forecast vs True Latent Demand  (Test: 2023–2024)",
+        fontsize=11,
+    )
+    ax.set_ylabel("Passengers per day")
     ax.set_ylim(bottom=0)
-    ax.legend(fontsize=8, ncol=3, loc="upper left")
-    ax.grid(True, alpha=0.2)
+    ax.legend(fontsize=9, ncol=2, loc="upper left", framealpha=0.85)
+    ax.grid(True, alpha=0.18)
     plt.tight_layout()
 
     slug = od.replace("→", "_to_").replace(" ", "")
     out  = os.path.join(out_dir, f"experiment_{slug}.png")
-    plt.savefig(out, dpi=140, bbox_inches="tight")
+    plt.savefig(out, dpi=150, bbox_inches="tight")
     plt.close()
 
 
