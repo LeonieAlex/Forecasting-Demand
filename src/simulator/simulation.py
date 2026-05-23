@@ -55,7 +55,7 @@ def simulate_flight_booking_window(
         and shock multipliers from the upstream demand model.
     booking_curves : pd.DataFrame
         Output of generate_booking_curves().
-        Index = days_prior (high → low), columns = cabin names.
+        Index = days_prior (negative, ascending: -window … -1), columns = cabin names.
         Values = fraction of total cabin demand arriving on that specific day.
     rng : np.random.Generator
 
@@ -71,8 +71,8 @@ def simulate_flight_booking_window(
     if total_capacity == 0 or expected_demand <= 0:
         return _empty_result()
 
-    # Sort DTP from booking-open (highest) to departure (1)
-    dtps = sorted(booking_curves.index, reverse=True)
+    # Sort DTP ascending (most negative = earliest, -1 = departure eve)
+    dtps = sorted(booking_curves.index)
     dtp_to_idx = {dtp: i for i, dtp in enumerate(dtps)}
 
     cabin_latent:   dict[str, int] = {}
@@ -108,8 +108,9 @@ def simulate_flight_booking_window(
     # BOH snapshots
     boh_snapshots: dict[int, int] = {}
     for snap in BOH_SNAPSHOTS:
-        if snap in dtp_to_idx:
-            boh_snapshots[snap] = int(cum_boh[dtp_to_idx[snap]])
+        neg_snap = -snap
+        if neg_snap in dtp_to_idx:
+            boh_snapshots[snap] = int(cum_boh[dtp_to_idx[neg_snap]])
         else:
             boh_snapshots[snap] = 0   # beyond booking window
 

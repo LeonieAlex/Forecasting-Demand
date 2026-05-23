@@ -144,8 +144,8 @@ def generate_booking_curves(
 
     df = pd.DataFrame(curves)
 
-    # days_prior counts DOWN: first row = BOOKING_WINDOW_DAYS days before departure
-    df["days_prior"] = list(range(window, 0, -1))
+    # days_prior counts UP to 0: first row = -BOOKING_WINDOW_DAYS, last row = -1
+    df["days_prior"] = list(range(-window, 0))
     df = df.set_index("days_prior")
 
     return df
@@ -158,10 +158,10 @@ def cumulative_booking_curve(df_curves: pd.DataFrame) -> pd.DataFrame:
     Returns a DataFrame with the same shape as df_curves but values represent
     the CUMULATIVE fraction booked from booking_open up to each days_prior point.
 
-    Index is still days_prior (high → low = approaching departure).
+    Index is days_prior (negative, ascending: -window … -1).
     """
-    # Reverse so cumsum runs from earliest (highest days_prior) to latest
-    return df_curves.iloc[::-1].cumsum().iloc[::-1]
+    # Index is already ascending (earliest → departure), so cumsum directly
+    return df_curves.cumsum()
 
 
 def simulate_reading_date(
@@ -204,9 +204,8 @@ def simulate_reading_date(
 
     cumulative = cumulative_booking_curve(df_curves)
 
-    # Clip days_prior to valid range
-    max_dtp = df_curves.index.max()
-    days_prior = int(np.clip(days_prior, 1, max_dtp))
+    # Convert positive days_prior to negative index convention, clip to valid range
+    neg_dtp = int(np.clip(-days_prior, df_curves.index.min(), -1))
 
     results: dict[str, dict] = {}
 
@@ -215,7 +214,7 @@ def simulate_reading_date(
             continue
 
         # Smooth cumulative fraction from Beta CDF
-        on_curve = float(cumulative.loc[days_prior, segment])
+        on_curve = float(cumulative.loc[neg_dtp, segment])
 
         # Add booking noise (bookings are lumpy, not perfectly smooth)
         noise = 1.0 + noise_sigma * rng.standard_normal()

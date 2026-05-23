@@ -212,12 +212,29 @@ def save(df_od: pd.DataFrame, df_flights: pd.DataFrame, out_dir: str):
 
     od_path      = os.path.join(out_dir, "OD_LatentDemand.csv")
     flights_path = os.path.join(out_dir, "flights_latent.csv")
+    trunc_path   = os.path.join(out_dir, "flights_truncated.csv")
 
     df_od.to_csv(od_path, index=False)
     print(f"\nSaved OD-pair dataset     → {od_path}  ({len(df_od):,} rows)")
 
     df_flights.to_csv(flights_path, index=False)
     print(f"Saved per-flight dataset  → {flights_path}  ({len(df_flights):,} rows)")
+
+    # Truncated view — oracle/latent columns removed, observed renamed to 'pax'
+    # This is what a real RM system sees: no ground truth, only sold seats + BOH.
+    drop_cols = (
+        [c for c in df_flights.columns if c.startswith("oracle_")]
+        + ["latent_seats"]
+    )
+    df_trunc = (
+        df_flights
+        .drop(columns=drop_cols)
+        .rename(columns={"observed_seats": "pax",
+                         **{f"observed_{cab}_pax": f"{cab}_pax"
+                            for cab in ["first", "business", "premium_eco", "economy"]}})
+    )
+    df_trunc.to_csv(trunc_path, index=False)
+    print(f"Saved truncated dataset   → {trunc_path}  ({len(df_trunc):,} rows)")
 
 
 if __name__ == "__main__":
